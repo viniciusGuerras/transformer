@@ -7,13 +7,13 @@ from torch.nn import functional as F
 #hyperparameters
 context_window = 8
 head_size = 6
-num_heads = 6
 num_embeds = 512
-dropout = 0.1
-vocab_size = 280
-n_layers = 6
-epochs = 5000
-learning_rate = 1e-3
+dropout = 0.2
+num_heads = 8
+n_layers = 4
+epochs = 1000
+learning_rate = 1e-4
+batch_size = 32
 #-----
 
 # data loading and pre-processing
@@ -28,15 +28,32 @@ data_array = ["<START> " + str(phrase) + " <END>" for phrase in data_array]
 pattern = re.compile("'s|'t|'re|'ve|'m|'ll|'d|(?:\s{2,}(?=\S))| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+|\$+")
 res = re.compile(pattern)
 """
+all_text = "".join(data_array)
+chars = sorted(list(set(all_text)))
+vocab_size = len(chars)
+stoi = { ch: i for i, ch in enumerate(chars) }
+itos = { i: ch for i, ch in enumerate(chars) }
+encode = lambda s: [stoi[c] for c in s]  # encoder: string -> list of integers
+decode = lambda l: ''.join([itos[i] for i in l])  # decoder: list of integers -> string
 
-print(data_array)
+# Encode each phrase individually (character-level)
+data_array = [encode(phrase) for phrase in data_array]
 
-train_data = data_array[:n]
-val_data = data_array[n:]
+# Flatten the list of lists into a single list of integers
+data_array = [token for phrase in data_array for token in phrase]
 
-def get_batch(ids):
-    pass
- 
+train_data = torch.tensor(data_array[:n])
+val_data = torch.tensor(data_array[n:])
+
+def get_batch(split):
+    # generate a small batch of data of inputs x and targets y
+    data = train_data if split == 'train' else val_data
+    ix = torch.randint(len(data) - context_window, (batch_size,))
+    x = torch.stack([data[i:i+context_window] for i in ix])
+    y = torch.stack([data[i+1:i+context_window+1] for i in ix])
+    return x, y
+
+
 class HeadAttention(nn.Module):
     def __init__(self, n_embed, head_size):
         super().__init__()
@@ -83,6 +100,7 @@ class MultiHeadAttention(nn.Module):
 
 class FeedForward(nn.Module):
     def __init__(self, num_embeds):
+        super().__init__()
         # basic ReLu with linear layers to increase dimensionality and pick important patterns
         self.net = nn.Sequential(
             nn.Linear(num_embeds, num_embeds * 4),
@@ -112,8 +130,8 @@ class Block(nn.Module):
         return x
 
 class Transformer(nn.Module):
-    def __init__(self):
-        super().__init__(self, num_embeds, context_window)
+    def __init__(self, num_embeds, context_window):
+        super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, num_embeds)
         self.pos_embedding_table = nn.Embedding(context_window, num_embeds)
         self.blocks = nn.Sequential(*[Block(num_embeds, num_heads) for _ in range(n_layers)])
@@ -141,24 +159,37 @@ class Transformer(nn.Module):
         return logits, loss
 
 
+    def generate(self, idx, max_new_tokens):
+        # idx is (B, T) array of indices in the current context
+        for _ in range(max_new_tokens):
+            # crop idx to the last block_size tokens
+            idx_cond = idx[:, -context_window:]
+            # get the predictions
+            logits, loss = self(idx_cond)
+            # focus only on the last time step
+            logits = logits[:, -1, :] # becomes (B, C)
+            # apply softmax to get probabilities
+            probs = F.softmax(logits, dim=-1) # (B, C)
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1) # (B, 1)
+            # append sampled index to the running sequence
+            idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+        return idx
 
-"""
-model = Transformer()
+model = Transformer(num_embeds, context_window)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
 for iter in range(epochs):
 
-    # sample a batch of data
     xb, yb = get_batch('train')
 
-    if epochs%100 == 0:
-        print(loss)
-
-    # evaluate the loss
     logits, loss = model(xb, yb)
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
 
-"""
+    print(f"epoch: {iter} and loss:{loss}")
+
+context = torch.zeros((1, 1), dtype=torch.long)
+print(decode(model.generate(context, max_new_tokens=200)[0].tolist()))
