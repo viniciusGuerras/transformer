@@ -4,17 +4,21 @@ import torch
 import regex as re
 from torch import nn
 from torch.nn import functional as F
+from tokenizer import Tokenizer
+
 #hyperparameters
-context_window = 8
+context_window = 16
 head_size = 6
 num_embeds = 512
 dropout = 0.2
 num_heads = 8
-n_layers = 4
+n_layers = 6
 epochs = 1000
 learning_rate = 1e-4
 batch_size = 32
+vocab_size = 500
 #-----
+
 
 # data loading and pre-processing
 data = pd.read_csv("datasets/Game_of_Thrones_Script.csv")
@@ -24,27 +28,17 @@ n = int(0.9 * float(data_array.shape[0]))
 
 data_array = ["<START> " + str(phrase) + " <END>" for phrase in data_array]
 
-"""
-pattern = re.compile("'s|'t|'re|'ve|'m|'ll|'d|(?:\s{2,}(?=\S))| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+|\$+")
-res = re.compile(pattern)
-"""
-all_text = "".join(data_array)
-chars = sorted(list(set(all_text)))
-vocab_size = len(chars)
-stoi = { ch: i for i, ch in enumerate(chars) }
-itos = { i: ch for i, ch in enumerate(chars) }
-encode = lambda s: [stoi[c] for c in s]  # encoder: string -> list of integers
-decode = lambda l: ''.join([itos[i] for i in l])  # decoder: list of integers -> string
+toke = Tokenizer()
 
-# Encode each phrase individually (character-level)
-data_array = [encode(phrase) for phrase in data_array]
-
-# Flatten the list of lists into a single list of integers
-data_array = [token for phrase in data_array for token in phrase]
+data_array = toke.encode("".join(data_array[:5000]), vocab_size)
 
 train_data = torch.tensor(data_array[:n])
 val_data = torch.tensor(data_array[n:])
 
+"""
+pattern = re.compile("'s|'t|'re|'ve|'m|'ll|'d|(?:\s{2,}(?=\S))| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+|\$+")
+res = re.compile(pattern)
+"""
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
     data = train_data if split == 'train' else val_data
@@ -189,7 +183,8 @@ for iter in range(epochs):
     loss.backward()
     optimizer.step()
 
-    print(f"epoch: {iter} and loss:{loss}")
+    if iter%100==0:
+        print(f"epoch: {iter} and loss:{loss}")
 
 context = torch.zeros((1, 1), dtype=torch.long)
-print(decode(model.generate(context, max_new_tokens=200)[0].tolist()))
+print(toke.decode(model.generate(context, max_new_tokens=2000)[0].tolist()))
