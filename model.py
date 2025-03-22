@@ -195,12 +195,16 @@ for iter in range(epochs):
     loss.backward()
     optimizer.step()
 
+<<<<<<< HEAD
     if iter%1000==0:
         checkpoint = {
             'state_dict': model.state_dict(),
             'optimizer': optimizer.state_dict(),
         }
         save_checkpoint(checkpoint)
+=======
+    if iter%100==0:
+>>>>>>> 858ecee0c088f2de0e6455bf3b33c81efd9de198
         print(f"epoch: {iter} and loss:{loss}")
 
 context = torch.zeros((1, 1), dtype=torch.long)
