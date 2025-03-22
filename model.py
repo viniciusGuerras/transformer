@@ -4,46 +4,48 @@ import torch
 import regex as re
 from torch import nn
 from torch.nn import functional as F
+from tokenizer import Tokenizer
+import regex as re
+
 #hyperparameters
-context_window = 8
+context_window = 32
 head_size = 6
 num_embeds = 512
 dropout = 0.2
-num_heads = 8
-n_layers = 4
+num_heads = 4
+n_layers = 2
 epochs = 1000
 learning_rate = 1e-4
-batch_size = 32
+batch_size = 16
+vocab_size = 290
+load_model = False
 #-----
 
-# data loading and pre-processing
-data = pd.read_csv("datasets/Game_of_Thrones_Script.csv")
-data_array = np.array(data.iloc[:, 5])
+toke = Tokenizer()
+
+# data loading ad pre-processing
+data = pd.read_csv("datasets/obras_machado_de_assis.csv")
+data_array = np.array(data["texto"])
 
 n = int(0.9 * float(data_array.shape[0]))
 
-data_array = ["<START> " + str(phrase) + " <END>" for phrase in data_array]
+toke = Tokenizer()
 
-"""
-pattern = re.compile("'s|'t|'re|'ve|'m|'ll|'d|(?:\s{2,}(?=\S))| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+|\$+")
-res = re.compile(pattern)
-"""
-all_text = "".join(data_array)
-chars = sorted(list(set(all_text)))
-vocab_size = len(chars)
-stoi = { ch: i for i, ch in enumerate(chars) }
-itos = { i: ch for i, ch in enumerate(chars) }
-encode = lambda s: [stoi[c] for c in s]  # encoder: string -> list of integers
-decode = lambda l: ''.join([itos[i] for i in l])  # decoder: list of integers -> string
-
-# Encode each phrase individually (character-level)
-data_array = [encode(phrase) for phrase in data_array]
-
-# Flatten the list of lists into a single list of integers
-data_array = [token for phrase in data_array for token in phrase]
-
+data_array = toke.encode(data_array[:1000],vocab_size)
 train_data = torch.tensor(data_array[:n])
 val_data = torch.tensor(data_array[n:])
+
+vocab_size = int(max(data_array)) + 1
+
+def save_checkpoint(state, filename="checkpoints/checkpoint.pth.tar"):
+    print("=> Saving checkpoint")
+    torch.save(state, filename)
+
+def load_checkpoint(checkpoint, model, optimizer):
+    print("=> Loading checkpoint")
+    model.load_state_dict(checkpoint['state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+
 
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
@@ -104,7 +106,7 @@ class FeedForward(nn.Module):
         # basic ReLu with linear layers to increase dimensionality and pick important patterns
         self.net = nn.Sequential(
             nn.Linear(num_embeds, num_embeds * 4),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(num_embeds * 4, num_embeds),
             nn.Dropout(dropout)
         )
@@ -180,6 +182,10 @@ model = Transformer(num_embeds, context_window)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
+if load_model:
+    checkpoint = torch.load("checkpoints/checkpoint.pth.tar")
+    load_checkpoint(checkpoint, model, optimizer)
+
 for iter in range(epochs):
 
     xb, yb = get_batch('train')
@@ -189,7 +195,13 @@ for iter in range(epochs):
     loss.backward()
     optimizer.step()
 
-    print(f"epoch: {iter} and loss:{loss}")
+    if iter%1000==0:
+        checkpoint = {
+            'state_dict': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+        }
+        save_checkpoint(checkpoint)
+        print(f"epoch: {iter} and loss:{loss}")
 
 context = torch.zeros((1, 1), dtype=torch.long)
-print(decode(model.generate(context, max_new_tokens=200)[0].tolist()))
+print(toke.decode(model.generate(context, max_new_tokens=2000)[0].tolist()))
