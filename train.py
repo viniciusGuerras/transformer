@@ -13,7 +13,7 @@ optimize - all of tat
 
 
 #hyperparameters
-epochs = 3000
+epochs = 2000
 learning_rate = 1e-4
 batch_size = 64
 num_embeds = 512
@@ -25,10 +25,11 @@ this can impact the multiplications because of division
 sometimes the head size (head_size = n_embeds//n_heads) 
 inteferes with the matrice size (because of float division)
 """
-n_heads = 16
-load_model = True
 
-context_window = 32
+n_heads = 8
+load_model = False    
+
+context_window = 
 current_context_window = 8
 context_window_step = 8
 
@@ -37,7 +38,7 @@ top_k = 2
 #-----
 
 toke = Tokenizer()
-"""
+
 # data loading ad pre-processing
 data = pd.read_csv("datasets/obras_machado_de_assis.csv")
 data_array = np.array(data["texto"])
@@ -49,7 +50,7 @@ data_array = toke.encode(data_array,vocab_size)
 n = int(0.9 * float(len(data_array)))
 train_data = torch.tensor(data_array[:n])
 val_data = torch.tensor(data_array[n:])
-"""
+
 
 def save_checkpoint(state, filename="checkpoints/model/checkpoint.pth.tar"):
     print("=> Saving checkpoint")
@@ -74,9 +75,9 @@ model = Transformer(vocab_size, n_layers, n_heads, num_embeds, context_window, n
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
 if load_model:
-    checkpoint = torch.load("/Users/viniciusguerra/Documents/nlp/base/checkpoints/model/checkpoint.pth.tar")
+    checkpoint = torch.load("checkpoints/model/checkpoint.pth.tar")
     load_checkpoint(checkpoint, model, optimizer)
-"""
+
 # TRAINING LOOP 
 for iter in range(epochs):
 
@@ -98,6 +99,5 @@ for iter in range(epochs):
         save_checkpoint(checkpoint)
         print(f"epoch: {iter} and loss:{loss}")
 
-"""
 context = torch.zeros((1, 1), dtype=torch.long)
 print(toke.decode(model.generate(context, max_new_tokens=5000)[0].tolist(), load=True))
