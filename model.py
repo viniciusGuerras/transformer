@@ -2,24 +2,18 @@ import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
+from cnn_tokenizer import CnnTokenizer
 
-#hyperparameters
-head_size = 6
-num_embeds = 512
-dropout = 0.3
-num_heads = 8
-n_layers = 6
-vocab_size = 500
-context_window = 128
+dropout = 0.2
 
 class HeadAttention(nn.Module):
-    def __init__(self, n_embed, head_size):
+    def __init__(self, n_embed, head_size, block_size):
         super().__init__()
         self.head_size = head_size
         self.query = nn.Linear(n_embed, head_size, bias=False)
         self.key = nn.Linear(n_embed, head_size, bias=False) 
         self.value = nn.Linear(n_embed, head_size, bias=False)
-        self.register_buffer("tril", torch.tril(torch.ones(context_window, context_window)))
+        self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
 
     def forward(self, x):
         #the x will come from the model, it will be the input embedding + positional encoding
@@ -44,12 +38,12 @@ class HeadAttention(nn.Module):
         return ouput
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, n_heads, head_size):
+    def __init__(self, n_embds, n_heads, head_size, block_size):
         super().__init__()
         #create a bunch of attention heads
-        self.heads = nn.ModuleList([HeadAttention(num_embeds, head_size) for _ in range(n_heads)])
+        self.heads = nn.ModuleList([HeadAttention(n_embds, head_size, block_size) for _ in range(n_heads)])
         #make a linear projection for the values
-        self.proj = nn.Linear(num_embeds, num_embeds)
+        self.proj = nn.Linear(n_embds, n_embds)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
@@ -57,45 +51,88 @@ class MultiHeadAttention(nn.Module):
         return self.dropout(self.proj(out))
 
 class FeedForward(nn.Module):
-    def __init__(self, num_embeds):
+    def __init__(self, n_embds):
         super().__init__()
         # basic ReLu with linear layers to increase dimensionality and pick important patterns
         self.net = nn.Sequential(
-            nn.Linear(num_embeds, num_embeds * 4),
+            nn.Linear(n_embds, n_embds * 4),
             nn.GELU(),
-            nn.Linear(num_embeds * 4, num_embeds),
+            nn.Linear(n_embds * 4, n_embds),
             nn.Dropout(dropout)
         )
+
     def forward(self, x):
         return self.net(x)
 
+# a simple expert, whic is a feed forward layer
 class Expert(nn.Module):
-    def __init__(self, num_embds):
+    def __init__(self, n_embds):
         super().__init__()
-        self.forward_layer = FeedForward(num_embds)
+        self.forward_layer = FeedForward(n_embds)
     def forward(self, x):
         return self.forward_layer(x)
 
 class NoisytopkRouter(nn.Module):
-    def __init__(self, n_embeds, n_experts, top_k):
+    def __init__(self, n_embds, n_experts, top_k):
+        """
+            top_k: number of experts selected
+            linear: layer for the forward pass 
+            noise: layer for the noise process
+        """
         super().__init__()
         self.top_k = top_k
-        self.linear = nn.Linear(n_embeds, n_experts)
-        self.noise = nn.Linear(n_embeds, n_experts)
+        self.linear = nn.Linear(n_embds, n_experts)
+        self.noise = nn.Linear(n_embds, n_experts)
 
     def forward(self, x):
-        logits = self.linear(x)
+        # x = (B, T, C)  # Input shape
+        # B = Batch size
+        # T = Sequence length (number of time steps or tokens)
+        # C = Number of channels (features, or embedding size)
 
-        noise_logits = self.noise(x)
-        noise = torch.randn_like(logits)*F.softplus(noise_logits)
+        # Pass the input through the linear layers to produce logits
+        logits = self.linear(x)  # (B, T, n_experts)
+        # After applying self.linear(x), the shape is (B, T, n_experts), where:
+        # B = Batch size
+        # T = Sequence length
+        # n_experts = Number of experts
+        
+        noise_logits = self.noise(x)  # (B, T, n_experts)
+        # After applying self.noise(x), the shape is (B, T, n_experts), same as logits
 
-        noise_logits = logits + noise
+        # Use the standard deviation, multiplied by the softplus of the noise logits to create the noise
+        noise = torch.randn_like(logits) * F.softplus(noise_logits)  # (B, T, n_experts)
+        # torch.randn_like(logits) produces a tensor with the same shape as logits filled with random values.
+        # F.softplus(noise_logits) applies the softplus function element-wise to the noise logits.
+        # This will result in the same shape as logits, which is (B, T, n_experts).
+        
+        # Add noise to logits
+        noise_logits = logits + noise  # (B, T, n_experts)
+        # The resulting shape is (B, T, n_experts), adding noise to logits element-wise.
 
-        top_k_logits, indices = noise_logits.topk(self.top_k, dim=-1)
-        zeroes =  torch.full_like(noise_logits, float('-inf'))
-        sparse_logits = zeroes.scatter(-1, indices, top_k_logits)
-        router_ouput = F.softmax(sparse_logits, dim=-1)
-        return router_ouput, indices
+        # Using the top-k function to get the top-k largest values and their indices
+        top_k_logits, indices = noise_logits.topk(self.top_k, dim=-1)  # (B, T, top_k), (B, T, top_k)
+        # top_k_logits will have the top-k values for each input in the batch, shape: (B, T, top_k)
+        # indices will hold the indices of those top-k values, shape: (B, T, top_k)
+        # top_k: number of experts to select.
+
+        # Create a tensor of -inf values, with the same shape as noise_logits
+        zeroes = torch.full_like(noise_logits, float('-inf'))  # (B, T, n_experts)
+        # This will create a tensor with the same shape as noise_logits (B, T, n_experts), filled with -inf.
+
+        # Add the top-k values to the -inf matrix at the corresponding positions
+        sparse_logits = zeroes.scatter(-1, indices, top_k_logits)  # (B, T, n_experts)
+        # zeroes.scatter(-1, indices, top_k_logits) will scatter the top_k_logits into the zeroes tensor
+        # at the positions indicated by the indices. This will result in a sparse tensor where only the top-k
+        # positions contain values and the rest are -inf.
+
+        # Use the softmax function to zero out the -inf and retain the values that are non -inf
+        router_output = F.softmax(sparse_logits, dim=-1)  # (B, T, n_experts)
+        # The softmax function will compute probabilities across the last dimension (experts) by scaling the logits
+        # such that their sum equals 1 for each (B, T) pair, and the -inf values will be turned into zeroes.
+
+        # Return the final output and the indices of selected experts
+        return router_output, indices  # (B, T, n_experts), (B, T, top_k)
 
 class SparseMoE(nn.Module):
     def __init__(self, n_embed, num_experts, top_k):
@@ -105,43 +142,50 @@ class SparseMoE(nn.Module):
         self.top_k = top_k
 
     def forward(self, x):
-        gating_output, indices = self.router(x)
-        final_output = torch.zeros_like(x)
+        # Get the output of the router and the indices of the top-k experts for each input
+        gating_output, indices = self.router(x)  # gating_output: (B, T, n_experts), indices: (B, T, top_k)
+        
+        # Initialize the final output tensor with zeros, having the same shape as the input
+        final_output = torch.zeros_like(x)  # final_output: (B, T, C)
+        
+        # Reshape inputs and gating outputs for efficient batch processing (leaves only the last dimension)
+        flat_x = x.view(-1, x.size(-1))  # flat_x: (B*T, C)
+        flat_gating_output = gating_output.view(-1, gating_output.size(-1))  # flat_gating_output: (B*T, n_experts)
 
-        # Reshape inputs for batch processing
-        flat_x = x.view(-1, x.size(-1))
-        flat_gating_output = gating_output.view(-1, gating_output.size(-1))
-
-        # Process each expert in parallel
+        # Loop over each expert to process in parallel
         for i, expert in enumerate(self.experts):
-            # Create a mask for the inputs where the current expert is in top-k
-            expert_mask = (indices == i).any(dim=-1)
-            flat_mask = expert_mask.view(-1)
+            # Create a mask for inputs where the current expert is in the top-k (based on the indices)
+            expert_mask = (indices == i).any(dim=-1)  # expert_mask: (B, T), indicates which inputs are assigned to expert i
+            flat_mask = expert_mask.view(-1)  # flat_mask: (B*T), flattened mask for batch processing
 
+            # If there are any inputs assigned to the current expert (i.e., expert_mask has any True values)
             if flat_mask.any():
-                expert_input = flat_x[flat_mask]
-                expert_output = expert(expert_input)
+                # Select the input data that corresponds to the current expert using the mask
+                expert_input = flat_x[flat_mask]  # expert_input: (N, C) where N is the number of inputs assigned to expert i
+                # Pass the expert input through the expert (e.g., a neural network layer)
+                expert_output = expert(expert_input)  # expert_output: (N, output_size) where output_size is the expert output size
 
-                # Extract and apply gating scores
-                gating_scores = flat_gating_output[flat_mask, i].unsqueeze(1)
-                weighted_output = expert_output * gating_scores
+                # Extract the gating scores for the current expert and apply them to the expert's output
+                gating_scores = flat_gating_output[flat_mask, i].unsqueeze(1)  # gating_scores: (N, 1)
+                weighted_output = expert_output * gating_scores  # weighted_output: (N, output_size)
 
-                # Update final output additively by indexing and adding
-                final_output[expert_mask] += weighted_output.squeeze(1)
+                # Add the weighted output to the final output tensor at the positions indicated by the expert mask
+                final_output[expert_mask] += weighted_output.squeeze(1)  # final_output: (B, T, C)
 
-        return final_output
+        # Return the final output after processing all experts and applying gating
+        return final_output  # final_output: (B, T, C)
     
 class Block(nn.Module):
-    def __init__(self, n_embeds, n_heads, n_experts, top_k):
+    def __init__(self, n_embds, n_heads, n_experts, top_k, block_size):
         super().__init__()
-        head_size = n_embeds//n_heads
+        head_size = n_embds//n_heads
         # divide the attention in differents part of the embedding (to pick various types of connections)
         # communicate
-        self.sa = MultiHeadAttention(n_heads, head_size)
+        self.sa = MultiHeadAttention(n_embds, n_heads, head_size, block_size)
         # computate
-        self.moe = SparseMoE(n_embeds, n_experts, top_k)
-        self.ln1 = nn.LayerNorm(n_embeds)
-        self.ln2 = nn.LayerNorm(n_embeds)
+        self.moe = SparseMoE(n_embds, n_experts, top_k)
+        self.ln1 = nn.LayerNorm(n_embds)
+        self.ln2 = nn.LayerNorm(n_embds)
 
     def forward(self, x):
         # residual connections
@@ -149,19 +193,38 @@ class Block(nn.Module):
         x = x + self.ln2(self.moe(x))
         return x
 
+# i still need to use this in the attention
+class KVCache:
+    def __init__(self, max_cache_size):
+        self.max_cache_size = max_cache_size
+        self.k_cache = []
+        self.v_cache = []
+
+    def update(self, key, value):
+        if len(self.k_cache) >= self.max_cache_size:
+            self.k_cache.pop(0)
+            self.v_cache.pop(0)
+
+        self.k_cache.append(key)
+        self.v_cache.append(value)
+
+    def get_cache(self):
+        return torch.stack(self.k_cache), torch.stack(self.v_cache)
+
 class Transformer(nn.Module):
-    def __init__(self, num_embeds, context_window, n_experts, top_k):
+    def __init__(self, vocab_size, n_layers, n_heads, n_embds, block_size, n_experts, top_k):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, num_embeds)
-        self.pos_embedding_table = nn.Embedding(context_window, num_embeds)
-        self.blocks = nn.Sequential(*[Block(num_embeds, num_heads, n_experts, top_k) for _ in range(n_layers)])
-        self.ln_f = nn.LayerNorm(num_embeds)
-        self.lm_head = nn.Linear(num_embeds, vocab_size)
+        self.block_size = block_size
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embds)
+        self.pos_embedding_table = nn.Embedding(block_size, n_embds)
+        self.blocks = nn.Sequential(*[Block(n_embds, n_heads, n_experts, top_k, block_size) for _ in range(n_layers)])
+        self.ln_f = nn.LayerNorm(n_embds)
+        self.lm_head = nn.Linear(n_embds, vocab_size)
 
     def forward(self, ids, targets=None):
         B, T = ids.shape
         toke_emb = self.token_embedding_table(ids)
-        #i need to change to sinusoidal later
+        #i need to change to rotatory later
         pos_emb = self.pos_embedding_table(torch.arange(T))
         sum = toke_emb + pos_emb
         sum = self.blocks(sum)
@@ -183,7 +246,7 @@ class Transformer(nn.Module):
         # idx is (B, T) array of indices in the current context
         for _ in range(max_new_tokens):
             # crop idx to the last block_size tokens
-            idx_cond = idx[:, -context_window:]
+            idx_cond = idx[:, -self.block_size:]
             # get the predictions
             logits, loss = self(idx_cond)
             # focus only on the last time step
