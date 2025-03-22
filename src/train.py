@@ -1,5 +1,5 @@
 from model import Transformer
-from tokenizer import Tokenizer
+from src.tokenizer import Tokenizer
 import pandas as pd
 import numpy as np
 import torch
@@ -29,7 +29,7 @@ inteferes with the matrice size (because of float division)
 n_heads = 8
 load_model = False    
 
-context_window = 
+context_window = 16
 current_context_window = 8
 context_window_step = 8
 
