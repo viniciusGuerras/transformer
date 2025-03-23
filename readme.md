@@ -41,17 +41,11 @@ top_k = 2
 
 📖 Example Output
 
-Below is a sample generated text from the model:
+Below is a sample generated text from the model (in pseudo-portuguese):
 
 ---
-As do bolsia algumas vendas fezerdamente o gramanho
-delá fez incere escimentado nenhum do alvoro. A
-segunda-lhe bancosidade ele. Franjo!
+as do bolsia algumas vendas fezerdamente o gramanho delá fez incere escimentado nenhum do alvoro. A segunda-lhe bancosidade ele. Franjo! Luís Rita impromagem o Escatêncio. Um damático das escadas que subida: Outrinava incribu-me razões. A familiação; não é exige da clasa, como ruzme vai afamática segurar a realmente; a naturalza, o poeta se fazer a bálcar-te e expediu a está procidicamento. Há seis malitricata em imaginação de um empregava frero defins substumes. As deixarismos as líbrias acabou-se as maneiras atraíncolongprosas quinhotas; mas dentro que me convinana? Mas afilhas com a Namão, ora Jamão, devemos o japoneto do Sr. Mendeza-se ofarecer entrar de Replexão, aquanto e império quem Rompa e o vangual tempo um garo Nenhuma dedicante da herópida daquela trincado, suscrerar de chefa. Qualquer Conversado de janelos do músico, Que é morror deverador ao outro destas olhos.
 
-Luís Rita impromagem o Escatêncio. Um damático das
-escadas que subida:
-
-Outrinava incribu-me razões.
 ---
 
 This text demonstrates how the model generates sequences based on learned patterns.
