@@ -21,32 +21,21 @@ Make sure you have the following installed:
 -   NumPy
 -   Pandas (if needed for preprocessing)
 
-output example for 
-
-#hyperparameters
+output example for the hyperparameters:
 epochs = 2000
 learning_rate = 1e-4
 batch_size = 64
 num_embeds = 1028
 vocab_size = 255
 n_layers = 6
-
-"""
-this can impact the multiplications because of division
-sometimes the head size (head_size = n_embeds//n_heads) 
-inteferes with the matrice size (because of float division)
-"""
-
 n_heads = 4
 load_model = False    
-
 context_window = 32
 current_context_window = 8
 context_window_step = 8
-
 n_experts = 8
 top_k = 2
-#-----
+--- 
 as do bolsia algumas vendas fezerdamente o gramanho
 delá fez incere escimentado nenhum do alvoro. A
 segunda-lhe bancosidade ele. Franjo!
