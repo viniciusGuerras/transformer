@@ -1,5 +1,5 @@
 from model import Transformer
-from src.tokenizer import Tokenizer
+from tokenizer import Tokenizer
 import pandas as pd
 import numpy as np
 import torch
@@ -16,9 +16,9 @@ optimize - all of tat
 epochs = 2000
 learning_rate = 1e-4
 batch_size = 64
-num_embeds = 512
+num_embeds = 1028
 vocab_size = 255
-n_layers = 12
+n_layers = 6
 
 """
 this can impact the multiplications because of division
@@ -26,10 +26,10 @@ sometimes the head size (head_size = n_embeds//n_heads)
 inteferes with the matrice size (because of float division)
 """
 
-n_heads = 8
+n_heads = 4
 load_model = False    
 
-context_window = 16
+context_window = 32
 current_context_window = 8
 context_window_step = 8
 
