@@ -40,8 +40,10 @@ top_k = 2
 toke = Tokenizer()
 
 # data loading ad pre-processing
-data = pd.read_csv("datasets/obras_machado_de_assis.csv")
-data_array = np.array(data["texto"])
+import pandas as pd
+
+data = pd.read_parquet("datasets/train-00000-of-00001-090b52ccb189d47a.parquet")
+data_array = np.array(data["text"])
 
 toke = Tokenizer()
 
