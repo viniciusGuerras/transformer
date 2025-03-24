@@ -7,11 +7,19 @@ import torch
 #to-do 
 """
 fix - special tokens and tokenizer saving and loading
-add - kv cache and RoPe
+add - kv cache and RoPe <- really important
 add - 16 bit/8 bit processing
 study - modern initialization methods
 optimize - all of tat
-
+Rotary Positional Embeddings (RoPE)
+Relative Positional Encodings
+Dynamic Attention Span
+Load Balancing for MoE
+Memory Augmentation / External Memory Modules
+Efficient Transformer Variants
+Multi-Task Learning or Auxiliary Objectives
+Adaptive Computation Time (ACT)
+Incorporating Pretrained Knowledge
 """
 
 #hyperparameters

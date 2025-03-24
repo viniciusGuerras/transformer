@@ -44,6 +44,8 @@ class MultiHeadAttention(nn.Module):
         #make a linear projection for the values
         self.proj = nn.Linear(n_embds, n_embds)
         self.dropout = nn.Dropout(dropout)
+        self.positional_embeddings = self.get_positional_embeddings(512, n_embds)
+
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
@@ -227,6 +229,7 @@ class Transformer(nn.Module):
         self.blocks = nn.Sequential(*[Block(n_embds, n_heads, n_experts, n_common_experts, top_k, block_size) for _ in range(n_layers)])
         self.ln_f = nn.LayerNorm(n_embds)
         self.lm_head = nn.Linear(n_embds, vocab_size)
+
 
     def forward(self, ids, targets=None):
         B, T = ids.shape
