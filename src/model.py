@@ -44,6 +44,8 @@ class MultiHeadAttention(nn.Module):
         #make a linear projection for the values
         self.proj = nn.Linear(n_embds, n_embds)
         self.dropout = nn.Dropout(dropout)
+        self.positional_embeddings = self.get_positional_embeddings(512, n_embds)
+
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
@@ -52,7 +54,7 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self, n_embds):
         super().__init__()
-        # basic ReLu with linear layers to increase dimensionality and pick important patterns
+        # basic GeLu with linear layers to increase dimensionality and pick important patterns
         self.net = nn.Sequential(
             nn.Linear(n_embds, n_embds * 4),
             nn.GELU(),
@@ -63,7 +65,7 @@ class FeedForward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-# a simple expert, whic is a feed forward layer
+# a simple expert, which is a feed forward layer
 class Expert(nn.Module):
     def __init__(self, n_embds):
         super().__init__()
@@ -134,14 +136,17 @@ class NoisytopkRouter(nn.Module):
         return router_output, indices  # (B, T, n_experts), (B, T, top_k)
 
 class SparseMoE(nn.Module):
-    def __init__(self, n_embed, num_experts, top_k):
+    def __init__(self, n_embed, num_experts, num_common_experts, top_k):
         super().__init__()
         self.router = NoisytopkRouter(n_embed, num_experts, top_k)
         self.experts = nn.ModuleList([Expert(n_embed) for _ in range(num_experts)])
+        self.common_experts = nn.ModuleList([Expert(n_embed) for _ in range(num_common_experts)])
         self.top_k = top_k
 
     def forward(self, x):
+        B, T, C = x.shape
         # Get the output of the router and the indices of the top-k experts for each input
+
         gating_output, indices = self.router(x)  # gating_output: (B, T, n_experts), indices: (B, T, top_k)
         
         # Initialize the final output tensor with zeros, having the same shape as the input
@@ -150,11 +155,12 @@ class SparseMoE(nn.Module):
         # Reshape inputs and gating outputs for efficient batch processing (leaves only the last dimension)
         flat_x = x.view(-1, x.size(-1))  # flat_x: (B*T, C)
         flat_gating_output = gating_output.view(-1, gating_output.size(-1))  # flat_gating_output: (B*T, n_experts)
-
+        
         # Loop over each expert to process in parallel
         for i, expert in enumerate(self.experts):
             # Create a mask for inputs where the current expert is in the top-k (based on the indices)
             expert_mask = (indices == i).any(dim=-1)  # expert_mask: (B, T), indicates which inputs are assigned to expert i
+
             flat_mask = expert_mask.view(-1)  # flat_mask: (B*T), flattened mask for batch processing
 
             # If there are any inputs assigned to the current expert (i.e., expert_mask has any True values)
@@ -171,18 +177,22 @@ class SparseMoE(nn.Module):
                 # Add the weighted output to the final output tensor at the positions indicated by the expert mask
                 final_output[expert_mask] += weighted_output.squeeze(1)  # final_output: (B, T, C)
 
+        for i, expert in enumerate(self.common_experts):
+            expert_output = expert(flat_x)
+            final_output += expert_output.view(B, T, C)
+
         # Return the final output after processing all experts and applying gating
         return final_output  # final_output: (B, T, C)
     
 class Block(nn.Module):
-    def __init__(self, n_embds, n_heads, n_experts, top_k, block_size):
+    def __init__(self, n_embds, n_heads, n_experts, n_common_experts, top_k, block_size):
         super().__init__()
         head_size = n_embds//n_heads
         # divide the attention in differents part of the embedding (to pick various types of connections)
         # communicate
         self.sa = MultiHeadAttention(n_embds, n_heads, head_size, block_size)
         # computate
-        self.moe = SparseMoE(n_embds, n_experts, top_k)
+        self.moe = SparseMoE(n_embds, n_experts, n_common_experts, top_k)
         self.ln1 = nn.LayerNorm(n_embds)
         self.ln2 = nn.LayerNorm(n_embds)
 
@@ -211,14 +221,15 @@ class KVCache:
         return torch.stack(self.k_cache), torch.stack(self.v_cache)
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size, n_layers, n_heads, n_embds, block_size, n_experts, top_k):
+    def __init__(self, vocab_size, n_layers, n_heads, n_embds, block_size, n_experts, n_common_experts, top_k):
         super().__init__()
         self.block_size = block_size
         self.token_embedding_table = nn.Embedding(vocab_size, n_embds)
         self.pos_embedding_table = nn.Embedding(block_size, n_embds)
-        self.blocks = nn.Sequential(*[Block(n_embds, n_heads, n_experts, top_k, block_size) for _ in range(n_layers)])
+        self.blocks = nn.Sequential(*[Block(n_embds, n_heads, n_experts, n_common_experts, top_k, block_size) for _ in range(n_layers)])
         self.ln_f = nn.LayerNorm(n_embds)
         self.lm_head = nn.Linear(n_embds, vocab_size)
+
 
     def forward(self, ids, targets=None):
         B, T = ids.shape
@@ -257,3 +268,4 @@ class Transformer(nn.Module):
             # append sampled index to the running sequence
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
+

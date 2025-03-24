@@ -7,17 +7,28 @@ import torch
 #to-do 
 """
 fix - special tokens and tokenizer saving and loading
-add - kv cache and RoPe
+add - kv cache and RoPe <- really important
+add - 16 bit/8 bit processing
+study - modern initialization methods
 optimize - all of tat
+Rotary Positional Embeddings (RoPE)
+Relative Positional Encodings
+Dynamic Attention Span
+Load Balancing for MoE
+Memory Augmentation / External Memory Modules
+Efficient Transformer Variants
+Multi-Task Learning or Auxiliary Objectives
+Adaptive Computation Time (ACT)
+Incorporating Pretrained Knowledge
 """
-
 
 #hyperparameters
 epochs = 2000
 learning_rate = 1e-4
 batch_size = 64
-num_embeds = 1028
-vocab_size = 255
+num_embeds = 512
+special_tokens_size = 2
+vocab_size = 300
 n_layers = 6
 
 """
@@ -27,32 +38,29 @@ inteferes with the matrice size (because of float division)
 """
 
 n_heads = 4
-load_model = False    
+load_model = True    
 
 context_window = 32
 current_context_window = 8
 context_window_step = 8
 
 n_experts = 8
+n_common_experts = 2
 top_k = 2
 #-----
 
 toke = Tokenizer()
 
-# data loading ad pre-processing
-import pandas as pd
-
 data = pd.read_parquet("datasets/train-00000-of-00001-090b52ccb189d47a.parquet")
 data_array = np.array(data["text"])
 
-toke = Tokenizer()
-
-data_array = toke.encode(data_array,vocab_size)
+data_array = toke.encode(data_array[:1000],vocab_size)
 
 n = int(0.9 * float(len(data_array)))
 train_data = torch.tensor(data_array[:n])
 val_data = torch.tensor(data_array[n:])
 
+vocab_size = vocab_size + special_tokens_size
 
 def save_checkpoint(state, filename="checkpoints/model/checkpoint.pth.tar"):
     print("=> Saving checkpoint")
@@ -71,8 +79,7 @@ def get_batch(split, size):
     y = torch.stack([data[i+1:i+size+1] for i in ix])
     return x, y
 
-
-model = Transformer(vocab_size, n_layers, n_heads, num_embeds, context_window, n_experts, top_k)
+model = Transformer(vocab_size, n_layers, n_heads, num_embeds, context_window, n_experts, n_common_experts, top_k)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
